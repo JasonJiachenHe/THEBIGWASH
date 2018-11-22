@@ -1,0 +1,180 @@
+const float BOARDLENGTH = 244;
+const float BOARDWIDTH = 130;
+const float STRING_PER_SPIN = 2;
+const int BOTWIDTH = 26;
+const int BOTHEIGHT = 25;
+const float MAX_TOP = 20;
+const float MAX_BOTTOM = 40;
+const int endOfBoard = 10;
+const int SPEED = 30;
+const int TOUCH_PORT_TOP = S1;
+const int TOUCH_PORT = S3;
+const int COLOR_PORT = S2;
+const int US_PORT = S4;
+int motorASpeed = 0;
+int motorDSpeed = 0;
+bool hasSwitchedDirection = false;
+
+
+
+void findMaxStringLength(float xDestination, float yDestination, float & leftMaxString, float & rightMaxString)
+{
+	leftMaxString = sqrt(pow(xDestination,2) + pow(yDestination,2));
+	rightMaxString = sqrt(pow(BOARDLENGTH - xDestination, 2) + pow(yDestination,2));
+}
+
+float findCurrStringLength(int motorEncoderValue)
+{
+	return (motorEncoderValue / 360.0) * STRING_PER_SPIN;
+}
+
+void shiftRight(int xCoordinate)
+{
+
+	float rightDiff = sqrt(pow(MAX_TOP, 2) + pow(BOARDLENGTH - xCoordinate, 2)) - sqrt(pow(MAX_TOP, 2)+ pow(BOARDLENGTH - (xCoordinate + BOTWIDTH), 2));
+	float leftDiff = sqrt(pow(MAX_TOP, 2) + pow(xCoordinate, 2)) - sqrt (pow(MAX_TOP, 2) + pow((xCoordinate + BOTWIDTH), 2));
+	motorDSpeed = SPEED; // 1.2 is for speed adjustment
+	motorASpeed = (int)(leftDiff/ rightDiff * SPEED);
+
+	nMotorEncoder [motorD] = 0;
+
+	while (findCurrStringLength(nMotorEncoder[motorD]) < rightDiff)
+	{
+		motor[motorA] = motorASpeed;
+		motor[motorD] = motorDSpeed;
+		wait1Msec(1000); //
+	}
+
+}
+
+void switchDirection(int & motorASpeed, int & motorDSpeed)
+{
+	motorASpeed = -1 * motorASpeed;
+	motorDSpeed = -1 * motorDSpeed;
+}
+
+void spinFlatBrush()
+{
+	motor[motorB] = 100;
+}
+
+void avoidObstacle(int xLocation){
+	float initDist = SensorValue[US_PORT];
+	if(initDist > BOTHEIGHT + endOfBoard)
+	{	
+		motor[motorA] = motor[motorD] = motor[motorB] = 0; // Stop the movement
+	
+		float robotRange = BOARDWIDTH - MAX_TOP - MAX_BOTTOM;
+		float leftDiff = sqrt(pow(BOARDWIDTH - initDist + BOTHEIGHT, 2) + pow(xLocation, 2)) - sqrt (pow(BOARDWIDTH - initDist, 2)+ pow(xLocation, 2));
+	
+		// Activate landing gears
+		motor[motorC] = -20;
+		wait1Msec(1000);
+		motor[motorC] = 0;
+	
+		// Drive the robot
+		motor[motorA] = motorASpeed;
+		motor[motorD] = motorDSpeed;
+	
+		nMotorEncoder [motorA] = 0;
+		
+		while (abs(findCurrStringLength(nMotorEncoder[motorA])) < leftDiff )
+		{}
+	
+		// Deactivate landing gears
+	
+		motor[motorC] = 20;
+		wait1Msec(1000);
+		motor[motorC] = 0;
+		spinFlatBrush();
+	}
+	
+	else
+	{
+		switchDirection(motorASpeed,motorDSpeed);
+		hasSwitchedDirection = true;
+	}
+	
+}
+
+
+void findMotorSpeeds(int & motorASpeed, int & motorDSpeed,int xLocation)
+{
+	float robotRange = BOARDWIDTH - MAX_TOP - MAX_BOTTOM;
+	float rightDiff = sqrt(pow(robotRange+MAX_TOP, 2) + pow(BOARDLENGTH - xLocation, 2)) - sqrt(pow(MAX_TOP, 2)+ pow(BOARDLENGTH - xLocation, 2));
+	float leftDiff = sqrt(pow(robotRange+MAX_TOP, 2) + pow(xLocation, 2)) - sqrt (pow(MAX_TOP, 2)+ pow(xLocation, 2));
+	if (leftDiff < rightDiff)
+	{
+		motorASpeed = -(leftDiff / rightDiff) * SPEED;
+		motorDSpeed = -SPEED;
+	}
+	else
+	{
+		motorASpeed = -SPEED;
+		motorDSpeed = -(rightDiff / leftDiff) * SPEED;
+	}
+}
+
+
+
+
+task main()
+{
+
+	float totalDistY = 0;
+	float leftMaxString = 0, rightMaxString = 0;
+
+
+	SensorType [TOUCH_PORT] = sensorEV3_Touch;
+	SensorType [TOUCH_PORT_TOP] = sensorEV3_Touch;
+	SensorType [US_PORT] = sensorEV3_Ultrasonic;
+	SensorType [COLOR_PORT] = sensorEV3_Color;
+	wait1Msec (50);
+	SensorMode [COLOR_PORT] = modeEV3Color_Ambient;
+	wait1Msec (50);
+
+	time1[T1] = 0;
+
+	nMotorEncoder[motorA] = 0;
+	nMotorEncoder[motorD]= 0;
+	spinFlatBrush();
+
+	for (int xCoord = 13; xCoord < BOARDLENGTH; xCoord += BOTWIDTH)
+	{
+		totalDistY = SensorValue[US_PORT];
+
+		findMaxStringLength(xCoord,totalDistY,leftMaxString, rightMaxString);
+		findMotorSpeeds(motorASpeed, motorDSpeed, xCoord);
+
+		//Set motorSpeed
+		motor[motorA] = motorASpeed;
+		motor[motorD] = motorDSpeed;
+
+		while(SensorValue[US_PORT] > endOfBoard && hasSwitchedDirection == false) // 10 cm away from the ground
+		{
+			if(SensorValue[TOUCH_PORT] == 1)
+				avoidObstacle(xCoord);
+		}
+		
+		if (!hasSwitchedDirection)
+			switchDirection(motorASpeed, motorDSpeed);
+	
+		hasSwitchedDirection = false;
+	  
+		motor[motorA] = motorASpeed;
+		motor[motorD] = motorDSpeed;
+
+		while(SensorValue[US_PORT] < totalDistY || SensorValue[US_PORT] > totalDistY + 5)
+		{
+			if(SensorValue[TOUCH_PORT_TOP] == 1)
+				avoidObstacle(xCoord);
+		}
+		
+		if(xCoord + BOTWIDTH < BOARDLENGTH) 
+			shiftRight(xCoord);
+	}
+}
+
+
+
+
